@@ -1,25 +1,28 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from contextlib import contextmanager
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-# URL para la base de datos SQLite
 SQLALCHEMY_DATABASE_URL = "sqlite:///./data/ecommerce_chat.db"
 
-# Crear motor de conexión a SQLite
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+)
 
-# Crear la base para los modelos ORM
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+)
+
 Base = declarative_base()
 
-# Crear la fábrica de sesiones para interactuar con la base de datos
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-@contextmanager
-def get_db() -> Session:
+def get_db():
     """
-    Dependency de FastAPI para manejar sesiones de base de datos.
-    Usamos yield para que se cierre automáticamente después de la operación.
+    Proporciona una sesión de base de datos para FastAPI.
+
+    Yields:
+        Session: Sesión activa de SQLAlchemy.
     """
     db = SessionLocal()
     try:
@@ -27,9 +30,9 @@ def get_db() -> Session:
     finally:
         db.close()
 
-def init_db():
+
+def init_db() -> None:
     """
-    Inicializa la base de datos y crea las tablas si no existen.
-    Se usa Base.metadata.create_all() para crear todas las tablas definidas.
+    Inicializa la base de datos creando las tablas definidas en los modelos ORM.
     """
     Base.metadata.create_all(bind=engine)
