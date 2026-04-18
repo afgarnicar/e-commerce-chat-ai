@@ -1,108 +1,153 @@
-import datetime
-from src.domain.repositories import IProductRepository, IChatRepository
-from src.application.dtos import ChatMessageRequestDTO, ChatMessageResponseDTO
-from src.domain.entities import ChatMessage, ChatContext
-from src.domain.exceptions import ProductNotFoundError
+from datetime import datetime, timezone
 from typing import List
-from src.services.gemini_service import GeminiService
+
+from src.application.dtos import ChatHistoryDTO, ChatMessageRequestDTO, ChatMessageResponseDTO
+from src.domain.entities import ChatContext, ChatMessage
+from src.domain.exceptions import ChatServiceError
+from src.domain.repositories import IChatRepository, IProductRepository
+from src.infrastructure.llm_providers.gemini_service import GeminiService
+
 
 class ChatService:
     """
-    Servicio de aplicación para manejar la lógica del chat con IA.
-    Recibe IProductRepository, IChatRepository y ai_service (GeminiService).
+    Servicio de aplicación para gestionar el chat con IA.
+
+    Este servicio coordina:
+    - Repositorio de productos
+    - Repositorio de historial de chat
+    - Servicio de IA (Gemini)
+
+    Su responsabilidad principal es construir el contexto conversacional,
+    solicitar una respuesta al modelo y persistir la conversación.
     """
 
-    def __init__(self, product_repository: IProductRepository, chat_repository: IChatRepository, ai_service: GeminiService):
+    def __init__(
+        self,
+        product_repository: IProductRepository,
+        chat_repository: IChatRepository,
+        ai_service: GeminiService,
+    ) -> None:
         """
-        Constructor para inyectar el repositorio de productos, repositorio de chat y el servicio de IA.
-        
+        Inicializa el servicio de chat con sus dependencias.
+
         Args:
-            product_repository (IProductRepository): Repositorio de productos
-            chat_repository (IChatRepository): Repositorio de mensajes de chat
-            ai_service (GeminiService): Servicio de IA (GeminiService)
+            product_repository (IProductRepository): Repositorio de productos.
+            chat_repository (IChatRepository): Repositorio de mensajes de chat.
+            ai_service (GeminiService): Servicio de IA para generar respuestas.
         """
         self.product_repository = product_repository
         self.chat_repository = chat_repository
         self.ai_service = ai_service
 
-    async def process_message(self, request: ChatMessageRequestDTO) -> ChatMessageResponseDTO:
+    async def process_message(
+        self,
+        request: ChatMessageRequestDTO,
+    ) -> ChatMessageResponseDTO:
         """
-        Procesa el mensaje del usuario, obtiene productos, contexto y genera una respuesta de IA.
-        
+        Procesa un mensaje del usuario y genera una respuesta usando IA.
+
+        Flujo:
+        1. Obtiene todos los productos
+        2. Recupera historial reciente
+        3. Construye el contexto conversacional
+        4. Solicita respuesta al servicio Gemini
+        5. Guarda mensaje del usuario
+        6. Guarda respuesta del asistente
+        7. Retorna DTO de respuesta
+
         Args:
-            request (ChatMessageRequestDTO): Mensaje de la solicitud del usuario
-        
+            request (ChatMessageRequestDTO): Mensaje entrante del usuario.
+
         Returns:
-            ChatMessageResponseDTO: Respuesta generada por el asistente
+            ChatMessageResponseDTO: Respuesta final del asistente.
+
+        Raises:
+            ChatServiceError: Si ocurre un error durante el proceso.
         """
         try:
-            # Obtener los productos del repositorio
             products = self.product_repository.get_all()
 
-            # Obtener el historial de mensajes (últimos 6 mensajes)
-            session_history = self.get_session_history(request.session_id, 6)
+            session_history = self.chat_repository.get_recent_messages(
+                request.session_id,
+                6,
+            )
             chat_context = ChatContext(messages=session_history, max_messages=6)
 
-            # Llamar al servicio de IA para generar la respuesta
             user_message = request.message
-            ai_response = await self.ai_service.generate_response(user_message, products, chat_context)
+            assistant_response = await self.ai_service.generate_response(
+                user_message=user_message,
+                products=products,
+                context=chat_context,
+            )
 
-            # Guardar mensaje del usuario en el repositorio
+            current_timestamp = datetime.now(timezone.utc)
+
             user_message_entity = ChatMessage(
+                id=None,
                 session_id=request.session_id,
                 role="user",
                 message=user_message,
-                timestamp=datetime.datetime.utcnow()
+                timestamp=current_timestamp,
             )
             self.chat_repository.save_message(user_message_entity)
 
-            # Guardar respuesta del asistente en el repositorio
             assistant_message_entity = ChatMessage(
+                id=None,
                 session_id=request.session_id,
                 role="assistant",
-                message=ai_response,
-                timestamp=datetime.datetime.utcnow()
+                message=assistant_response,
+                timestamp=current_timestamp,
             )
             self.chat_repository.save_message(assistant_message_entity)
 
-            # Retornar la respuesta en formato DTO
-            response_dto = ChatMessageResponseDTO(
+            return ChatMessageResponseDTO(
                 session_id=request.session_id,
                 user_message=user_message,
-                assistant_message=ai_response,
-                timestamp=datetime.datetime.utcnow()
+                assistant_message=assistant_response,
+                timestamp=current_timestamp,
             )
 
-            return response_dto
+        except Exception as exc:
+            raise ChatServiceError(
+                f"Error al procesar el mensaje del chat: {exc}"
+            ) from exc
 
-        except ProductNotFoundError as e:
-            # Manejo de excepciones, si no se encuentran productos
-            raise ValueError("No se encontraron productos para generar la respuesta.") from e
-        except Exception as e:
-            # Cualquier otro error inesperado
-            raise ValueError("Error al procesar el mensaje del usuario.") from e
-
-    def get_session_history(self, session_id: str, limit: int = 6) -> List[ChatMessage]:
+    def get_session_history(
+        self,
+        session_id: str,
+        limit: int = 10,
+    ) -> List[ChatHistoryDTO]:
         """
-        Obtiene el historial de mensajes de una sesión.
-        
+        Obtiene el historial de una sesión de chat.
+
         Args:
-            session_id (str): ID de la sesión de chat
-            limit (int): Número de mensajes a obtener (por defecto 6)
-        
+            session_id (str): Identificador de la sesión.
+            limit (int, optional): Número máximo de mensajes a recuperar.
+                Defaults to 10.
+
         Returns:
-            List[ChatMessage]: Lista de mensajes de la sesión
+            List[ChatHistoryDTO]: Historial formateado como DTOs.
         """
-        return self.chat_repository.get_session_history(session_id, limit)
+        messages = self.chat_repository.get_session_history(session_id, limit)
+
+        return [
+            ChatHistoryDTO(
+                id=message.id,
+                role=message.role,
+                message=message.message,
+                timestamp=message.timestamp,
+            )
+            for message in messages
+        ]
 
     def clear_session_history(self, session_id: str) -> int:
         """
-        Elimina todo el historial de mensajes de una sesión.
-        
+        Elimina todo el historial de una sesión.
+
         Args:
-            session_id (str): ID de la sesión de chat
-        
+            session_id (str): Identificador de la sesión.
+
         Returns:
-            int: Número de mensajes eliminados
+            int: Cantidad de mensajes eliminados.
         """
         return self.chat_repository.delete_session_history(session_id)
