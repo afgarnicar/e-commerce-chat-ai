@@ -4,11 +4,12 @@ from src.infrastructure.db.models import ProductModel
 from src.domain.entities import Product
 from typing import List, Optional
 
+
 class SQLProductRepository(IProductRepository):
     def __init__(self, db: Session):
         """
         Constructor para inyectar la sesión de base de datos.
-        
+
         Args:
             db (Session): La sesión de base de datos SQLAlchemy
         """
@@ -21,38 +22,59 @@ class SQLProductRepository(IProductRepository):
 
     def get_by_id(self, product_id: int) -> Optional[Product]:
         """Obtiene un producto por ID."""
-        product_model = self.db.query(ProductModel).filter(ProductModel.id == product_id).first()
+        product_model = (
+            self.db.query(ProductModel)
+            .filter(ProductModel.id == product_id)
+            .first()
+        )
         if product_model:
             return self._model_to_entity(product_model)
         return None
 
     def get_by_brand(self, brand: str) -> List[Product]:
         """Obtiene productos por marca."""
-        product_models = self.db.query(ProductModel).filter(ProductModel.brand == brand).all()
+        product_models = (
+            self.db.query(ProductModel)
+            .filter(ProductModel.brand == brand)
+            .all()
+        )
         return [self._model_to_entity(model) for model in product_models]
 
     def get_by_category(self, category: str) -> List[Product]:
         """Obtiene productos por categoría."""
-        product_models = self.db.query(ProductModel).filter(ProductModel.category == category).all()
+        product_models = (
+            self.db.query(ProductModel)
+            .filter(ProductModel.category == category)
+            .all()
+        )
         return [self._model_to_entity(model) for model in product_models]
 
     def save(self, product: Product) -> Product:
-        """Guarda o actualiza un producto."""
+        """
+        Guarda o actualiza un producto.
+        - Sin ID: crea un nuevo registro.
+        - Con ID: actualiza el registro existente.
+        """
         product_model = self._entity_to_model(product)
+
         if product.id:
-            # Actualizar el producto si tiene un ID
-            self.db.merge(product_model)
+            # merge sincroniza el estado del objeto con la sesión y hace UPDATE
+            product_model = self.db.merge(product_model)
         else:
-            # Crear un nuevo producto si no tiene ID
+            # add inserta un nuevo registro; refresh obtiene el ID generado
             self.db.add(product_model)
-            self.db.commit()
-            self.db.refresh(product_model)  # Obtener el ID generado
-        self.db.commit()  # Confirmar cambios
+
+        self.db.commit()
+        self.db.refresh(product_model)
         return self._model_to_entity(product_model)
 
     def delete(self, product_id: int) -> bool:
-        """Elimina un producto por ID."""
-        product_model = self.db.query(ProductModel).filter(ProductModel.id == product_id).first()
+        """Elimina un producto por ID. Retorna True si fue eliminado."""
+        product_model = (
+            self.db.query(ProductModel)
+            .filter(ProductModel.id == product_id)
+            .first()
+        )
         if product_model:
             self.db.delete(product_model)
             self.db.commit()
@@ -70,7 +92,7 @@ class SQLProductRepository(IProductRepository):
             color=model.color,
             price=model.price,
             stock=model.stock,
-            description=model.description
+            description=model.description,
         )
 
     def _entity_to_model(self, entity: Product) -> ProductModel:
@@ -84,5 +106,5 @@ class SQLProductRepository(IProductRepository):
             color=entity.color,
             price=entity.price,
             stock=entity.stock,
-            description=entity.description
+            description=entity.description,
         )
