@@ -1,0 +1,44 @@
+# Entorno virtual de Python — nunca debe entrar al contenedor
+venv/
+.venv/
+env/
+
+# Base de datos local (se monta como volumen)
+data/
+*.db
+*.sqlite3
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Pytest y cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Variables de entorno (seguridad)
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker (evita recursión)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentación y archivos del proyecto que no necesita el contenedor
+README.md
+*.md

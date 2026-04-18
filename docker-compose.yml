@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce-api
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/ecommerce_chat.db}
+    env_file:
+      - .env
+    volumes:
+      # Persistencia de la base de datos SQLite
+      - ./data:/app/data
+      # Montaje del código fuente para desarrollo con hot-reload
+      - .:/app
+    command: uvicorn src.infrastructure.api.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Volúmenes nombrados para persistencia de datos
+volumes:
+  db-data:
+    driver: local
+
+# Red interna para comunicación entre servicios
+networks:
+  app-network:
+    driver: bridge
